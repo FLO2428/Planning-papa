@@ -1,0 +1,25 @@
+-- À coller dans Supabase > SQL Editor > New query, puis Run.
+create extension if not exists pgcrypto;
+create table if not exists public.admin_users(user_id uuid primary key references auth.users(id) on delete cascade,created_at timestamptz not null default now());
+create table if not exists public.weeks(id uuid primary key default gen_random_uuid(),week_start date not null unique,title text not null default 'Programme de la semaine',general_notes text not null default '',published boolean not null default false,created_by uuid references auth.users(id),created_at timestamptz not null default now(),updated_at timestamptz not null default now());
+create table if not exists public.sessions(id uuid primary key default gen_random_uuid(),week_id uuid not null references public.weeks(id) on delete cascade,day_index integer not null check(day_index between 0 and 6),sport text not null default '',duration_minutes integer not null default 0 check(duration_minutes between 0 and 1440),volume text not null default '',details text not null default '',note text not null default '',created_at timestamptz not null default now(),unique(week_id,day_index));
+create table if not exists public.completions(session_id uuid primary key references public.sessions(id) on delete cascade,completed boolean not null default false,updated_at timestamptz not null default now());
+alter table public.admin_users enable row level security;alter table public.weeks enable row level security;alter table public.sessions enable row level security;alter table public.completions enable row level security;
+drop policy if exists "admins can read own admin row" on public.admin_users;
+drop policy if exists "read weeks" on public.weeks;drop policy if exists "manage weeks" on public.weeks;
+drop policy if exists "read sessions" on public.sessions;drop policy if exists "manage sessions" on public.sessions;
+drop policy if exists "read completions" on public.completions;drop policy if exists "insert completions" on public.completions;drop policy if exists "update completions" on public.completions;drop policy if exists "admin manage completions" on public.completions;
+create policy "admins can read own admin row" on public.admin_users for select to authenticated using(user_id=auth.uid());
+create policy "read weeks" on public.weeks for select to anon,authenticated using(published=true or exists(select 1 from public.admin_users a where a.user_id=auth.uid()));
+create policy "manage weeks" on public.weeks for all to authenticated using(exists(select 1 from public.admin_users a where a.user_id=auth.uid())) with check(exists(select 1 from public.admin_users a where a.user_id=auth.uid()));
+create policy "read sessions" on public.sessions for select to anon,authenticated using(exists(select 1 from public.weeks w where w.id=week_id and w.published=true) or exists(select 1 from public.admin_users a where a.user_id=auth.uid()));
+create policy "manage sessions" on public.sessions for all to authenticated using(exists(select 1 from public.admin_users a where a.user_id=auth.uid())) with check(exists(select 1 from public.admin_users a where a.user_id=auth.uid()));
+create policy "read completions" on public.completions for select to anon,authenticated using(exists(select 1 from public.sessions s join public.weeks w on w.id=s.week_id where s.id=session_id and w.published=true) or exists(select 1 from public.admin_users a where a.user_id=auth.uid()));
+create policy "insert completions" on public.completions for insert to anon,authenticated with check(exists(select 1 from public.sessions s join public.weeks w on w.id=s.week_id where s.id=session_id and w.published=true));
+create policy "update completions" on public.completions for update to anon,authenticated using(exists(select 1 from public.sessions s join public.weeks w on w.id=s.week_id where s.id=session_id and w.published=true)) with check(exists(select 1 from public.sessions s join public.weeks w on w.id=s.week_id where s.id=session_id and w.published=true));
+create policy "admin manage completions" on public.completions for all to authenticated using(exists(select 1 from public.admin_users a where a.user_id=auth.uid())) with check(exists(select 1 from public.admin_users a where a.user_id=auth.uid()));
+grant usage on schema public to anon,authenticated;
+grant select on public.weeks,public.sessions,public.completions to anon,authenticated;
+grant insert,update on public.completions to anon,authenticated;
+grant select,insert,update,delete on public.weeks,public.sessions,public.completions to authenticated;
+grant select on public.admin_users to authenticated;
